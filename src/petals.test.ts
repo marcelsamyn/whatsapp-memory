@@ -63,4 +63,17 @@ describe("ingestTranscript", () => {
     await expect(ingestTranscript(payload, config, { fetchImpl, sleep: noSleep })).rejects.toBeInstanceOf(IngestError);
     expect(calls).toBe(4);
   });
+
+  test("retries a 429 rate-limit then succeeds", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return calls < 2
+        ? new Response("rate limited", { status: 429 })
+        : new Response(JSON.stringify({ message: "queued", jobId: "job_429" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const res = await ingestTranscript(payload, config, { fetchImpl, sleep: noSleep });
+    expect(res.jobId).toBe("job_429");
+    expect(calls).toBe(2);
+  });
 });

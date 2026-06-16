@@ -52,7 +52,8 @@ export async function ingestTranscript(
         }
       }
       const text = await res.text();
-      if (res.status >= 400 && res.status < 500) {
+      // 429 (rate limited) is transient — retry it like a 5xx rather than hard-failing.
+      if (res.status >= 400 && res.status < 500 && res.status !== 429) {
         throw new IngestError(`transcript ingest rejected ${res.status}: ${text}`);
       }
       lastErr = new IngestError(`transcript ingest failed ${res.status}: ${text}`);
