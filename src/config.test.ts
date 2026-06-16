@@ -31,6 +31,11 @@ describe("loadConfig", () => {
     expect(cfg.TIMEZONE).toBe("UTC");
   });
 
+  test("rejects a non-positive BACKFILL_DAYS", () => {
+    expect(() => loadConfig({ PETALS_API_KEY: "k", SELF_ALIASES: "Me", BACKFILL_DAYS: "0" })).toThrow();
+    expect(() => loadConfig({ PETALS_API_KEY: "k", SELF_ALIASES: "Me", BACKFILL_DAYS: "-5" })).toThrow();
+  });
+
   test("rejects an invalid TIMEZONE", () => {
     expect(() => loadConfig({ PETALS_API_KEY: "k", SELF_ALIASES: "Me", TIMEZONE: "Banana/Split" })).toThrow();
   });

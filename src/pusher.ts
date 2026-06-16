@@ -35,43 +35,46 @@ export async function runPush(config: Config, deps: PushDeps = {}): Promise<Push
   }
 
   const archive = new WhatsAppArchive(config.WHATSAPP_ARCHIVE_PATH, { readonly: true });
-  const state = new PushState(config.PUSH_STATE_PATH);
   try {
-    const names = archive.chatNames();
-    const savedSenders = config.WHATSAPP_GROUP_FILTER === "all" ? null : archive.savedContacts();
-    for (const dayKey of recentCompletedDayKeys(now, config.TIMEZONE, config.BACKFILL_DAYS)) {
-      const { startIso, endIso } = dayWindowUtc(dayKey, config.TIMEZONE);
-      const messages = archive.listMessagesInWindow(
-        Math.floor(Date.parse(startIso) / 1000),
-        Math.floor(Date.parse(endIso) / 1000),
-      );
-      const transcripts = buildDayTranscripts({
-        messages,
-        names,
-        savedSenders,
-        dayKey,
-        selfAliases: config.SELF_ALIASES,
-      });
-      for (const t of transcripts) {
-        if (state.has(t.jid, t.dayKey)) {
-          summary.skipped += 1;
-          continue;
-        }
-        try {
-          await ingest(t.payload);
-          state.record(t.jid, t.dayKey, Math.floor(now.getTime() / 1000));
-          summary.pushed += 1;
-        } catch (error) {
-          summary.failed += 1;
-          console.error(
-            JSON.stringify({ type: "push-failed", transcriptId: t.payload.transcriptId, error: String(error) }),
-          );
+    const state = new PushState(config.PUSH_STATE_PATH);
+    try {
+      const names = archive.chatNames();
+      const savedSenders = config.WHATSAPP_GROUP_FILTER === "all" ? null : archive.savedContacts();
+      for (const dayKey of recentCompletedDayKeys(now, config.TIMEZONE, config.BACKFILL_DAYS)) {
+        const { startIso, endIso } = dayWindowUtc(dayKey, config.TIMEZONE);
+        const messages = archive.listMessagesInWindow(
+          Math.floor(Date.parse(startIso) / 1000),
+          Math.floor(Date.parse(endIso) / 1000),
+        );
+        const transcripts = buildDayTranscripts({
+          messages,
+          names,
+          savedSenders,
+          dayKey,
+          selfAliases: config.SELF_ALIASES,
+        });
+        for (const t of transcripts) {
+          if (state.has(t.jid, t.dayKey)) {
+            summary.skipped += 1;
+            continue;
+          }
+          try {
+            await ingest(t.payload);
+            state.record(t.jid, t.dayKey, Math.floor(now.getTime() / 1000));
+            summary.pushed += 1;
+          } catch (error) {
+            summary.failed += 1;
+            console.error(
+              JSON.stringify({ type: "push-failed", transcriptId: t.payload.transcriptId, error: String(error) }),
+            );
+          }
         }
       }
+      return summary;
+    } finally {
+      state.close();
     }
-    return summary;
   } finally {
     archive.close();
-    state.close();
   }
 }

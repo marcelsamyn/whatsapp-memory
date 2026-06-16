@@ -7,11 +7,17 @@ import { runPush } from "./pusher";
 
 const args = process.argv.slice(2);
 const backfillIdx = args.indexOf("--backfill");
-const base = loadConfig();
-const config =
-  backfillIdx >= 0 && Number.isFinite(Number(args[backfillIdx + 1]))
-    ? { ...base, BACKFILL_DAYS: Number(args[backfillIdx + 1]) }
-    : base;
+const overrides: Record<string, string | undefined> = { ...process.env };
+if (backfillIdx >= 0) {
+  const raw = args[backfillIdx + 1];
+  if (raw === undefined) {
+    console.error("usage: push --backfill <positive integer>");
+    process.exit(1);
+  }
+  // Let Zod coerce + validate (positive int); a bad value throws a clear config error.
+  overrides.BACKFILL_DAYS = raw;
+}
 
+const config = loadConfig(overrides);
 const summary = await runPush(config);
 console.log(JSON.stringify({ type: "push-summary", ...summary }));
