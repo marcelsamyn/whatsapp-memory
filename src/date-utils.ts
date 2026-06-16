@@ -1,0 +1,100 @@
+/**
+ * Timezone-aware day keys ("YYYY-MM-DD") and UTC bounds for a local day.
+ * Aliases: day window, local midnight, tz offset.
+ */
+export type DayKey = string;
+
+export function dayKeyFor(date: Date, timeZone: string): DayKey {
+  // en-CA renders as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+export function yesterdayKey(now: Date, timeZone: string): DayKey {
+  return dayKeyFor(new Date(now.getTime() - 24 * 60 * 60 * 1000), timeZone);
+}
+
+/** Milliseconds to add to a UTC instant to get the same wall-clock in `timeZone`. */
+function tzOffsetMs(at: Date, timeZone: string): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(at)
+      .map((p) => [p.type, p.value]),
+  ) as Record<string, string>;
+  const asUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return asUtc - at.getTime();
+}
+
+function localMidnightUtcIso(dayKey: DayKey, timeZone: string): string {
+  const naive = new Date(`${dayKey}T00:00:00Z`);
+  const offset = tzOffsetMs(naive, timeZone);
+  return new Date(naive.getTime() - offset).toISOString();
+}
+
+function nextDayKey(dayKey: DayKey): DayKey {
+  const next = new Date(`${dayKey}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
+/**
+ * The day the distiller should process given the current time: the current
+ * local day in the afternoon/evening (local hour >= 12), the previous day
+ * before noon. Makes an evening-scheduled run capture "today" while a run that
+ * slips to the next morning (e.g. after the Mac slept) still captures the
+ * intended day.
+ */
+export function targetDayKey(now: Date, timeZone: string): DayKey {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone, hour: "2-digit", hourCycle: "h23" }).format(now),
+  );
+  return hour >= 12 ? dayKeyFor(now, timeZone) : yesterdayKey(now, timeZone);
+}
+
+export function dayWindowUtc(dayKey: DayKey, timeZone: string): { startIso: string; endIso: string } {
+  return {
+    startIso: localMidnightUtcIso(dayKey, timeZone),
+    endIso: localMidnightUtcIso(nextDayKey(dayKey), timeZone),
+  };
+}
+
+export function previousDayKey(dayKey: DayKey): DayKey {
+  const prev = new Date(`${dayKey}T00:00:00Z`);
+  prev.setUTCDate(prev.getUTCDate() - 1);
+  return prev.toISOString().slice(0, 10);
+}
+
+/**
+ * The most recent `count` completed local day-keys, newest first: yesterday, the
+ * day before, … back `count` days. The current (still-open) local day is excluded
+ * so a transcript is only ever built once the day has closed.
+ */
+export function recentCompletedDayKeys(now: Date, timeZone: string, count: number): DayKey[] {
+  const keys: DayKey[] = [];
+  let key = previousDayKey(dayKeyFor(now, timeZone));
+  for (let i = 0; i < count; i += 1) {
+    keys.push(key);
+    key = previousDayKey(key);
+  }
+  return keys;
+}
