@@ -15,7 +15,7 @@ export function dayKeyFor(date: Date, timeZone: string): DayKey {
 }
 
 export function yesterdayKey(now: Date, timeZone: string): DayKey {
-  return dayKeyFor(new Date(now.getTime() - 24 * 60 * 60 * 1000), timeZone);
+  return previousDayKey(dayKeyFor(now, timeZone));
 }
 
 /** Milliseconds to add to a UTC instant to get the same wall-clock in `timeZone`. */

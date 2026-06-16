@@ -25,7 +25,18 @@ const configSchema = z.object({
   // Group-message relevance: "contacts" keeps only saved address-book contacts +
   // you; "all" keeps every group message. 1:1 chats are never filtered.
   WHATSAPP_GROUP_FILTER: z.enum(["contacts", "all"]).default("contacts"),
-  TIMEZONE: z.string().min(1).default("Europe/Brussels"),
+  TIMEZONE: z
+    .string()
+    .min(1)
+    .refine((tz) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "TIMEZONE must be a valid IANA timezone")
+    .default("Europe/Brussels"),
   BACKFILL_DAYS: z.coerce.number().int().positive().default(30),
   // Comma-separated; [0] is emitted as the speaker label for your own messages,
   // the full list is sent as userSelfAliasesOverride.

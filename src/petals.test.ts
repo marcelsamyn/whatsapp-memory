@@ -53,4 +53,14 @@ describe("ingestTranscript", () => {
     expect(res.jobId).toBe("job_2");
     expect(calls).toBe(2);
   });
+
+  test("throws after exhausting all retries on persistent 5xx", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response("err", { status: 503 });
+    }) as unknown as typeof fetch;
+    await expect(ingestTranscript(payload, config, { fetchImpl, sleep: noSleep })).rejects.toBeInstanceOf(IngestError);
+    expect(calls).toBe(4);
+  });
 });

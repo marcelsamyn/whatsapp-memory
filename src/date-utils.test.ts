@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { previousDayKey, recentCompletedDayKeys, dayWindowUtc } from "./date-utils";
+import { previousDayKey, recentCompletedDayKeys, dayWindowUtc, yesterdayKey } from "./date-utils";
+
+describe("yesterdayKey", () => {
+  test("is correct across the autumn fall-back boundary (Europe/Brussels)", () => {
+    // 2026-10-25 ~01:30 local is still Oct 25; yesterday must be Oct 24.
+    expect(yesterdayKey(new Date("2026-10-24T23:30:00Z"), "Europe/Brussels")).toBe("2026-10-24");
+  });
+});
 
 describe("previousDayKey", () => {
   test("steps back one calendar day across month/year boundaries", () => {

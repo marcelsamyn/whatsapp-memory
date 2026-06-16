@@ -30,4 +30,8 @@ describe("loadConfig", () => {
     expect(cfg.WHATSAPP_GROUP_FILTER).toBe("all");
     expect(cfg.TIMEZONE).toBe("UTC");
   });
+
+  test("rejects an invalid TIMEZONE", () => {
+    expect(() => loadConfig({ PETALS_API_KEY: "k", SELF_ALIASES: "Me", TIMEZONE: "Banana/Split" })).toThrow();
+  });
 });

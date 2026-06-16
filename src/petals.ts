@@ -44,7 +44,13 @@ export async function ingestTranscript(
       lastErr = e;
     }
     if (res) {
-      if (res.ok) return { jobId: responseSchema.parse(await res.json()).jobId };
+      if (res.ok) {
+        try {
+          return { jobId: responseSchema.parse(await res.json()).jobId };
+        } catch (e) {
+          throw new IngestError(`transcript ingest: unexpected response body: ${e}`);
+        }
+      }
       const text = await res.text();
       if (res.status >= 400 && res.status < 500) {
         throw new IngestError(`transcript ingest rejected ${res.status}: ${text}`);
