@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WhatsAppArchive } from "./archive";
+import { WhatsAppArchive } from "./archive.ts";
 
 const paths: string[] = [];
 
@@ -41,7 +41,7 @@ describe("WhatsAppArchive", () => {
     archive.storeMessages([message, message]);
 
     expect(archive.listMessages(message.jid, 50)).toEqual([message]);
-    expect(archive.status()).toEqual({ chatCount: 1, messageCount: 1 });
+    expect(archive.status()).toEqual({ chatCount: 1, messageCount: 1, lastMessageTimestamp: 1_700_000_000 });
     archive.close();
   });
 

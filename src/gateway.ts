@@ -6,13 +6,14 @@ import makeWASocket, {
   type AuthenticationState,
   type WAMessage,
 } from "@whiskeysockets/baileys";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import pino from "pino";
 import { z } from "zod";
-import { WhatsAppArchive, type ArchivedMessage } from "./archive";
-import { toArchivedMessage } from "./message";
-import { contactNameUpdates, groupNameUpdates, pushNameUpdates, type ChatNameUpdate } from "./names";
+import { WhatsAppArchive, type ArchivedMessage } from "./archive.ts";
+import { toArchivedMessage } from "./message.ts";
+import { contactNameUpdates, groupNameUpdates, pushNameUpdates, type ChatNameUpdate } from "./names.ts";
 
 process.umask(0o077);
 
@@ -20,6 +21,12 @@ const dataDirectory =
   process.env.WHATSAPP_DATA_DIR ??
   join(process.env.HOME ?? ".", ".screenpipe-distiller", "whatsapp");
 const port = Number(process.env.WHATSAPP_HTTP_PORT ?? "3036");
+const sessionDirectory = join(dataDirectory, "session");
+// WhatsApp answers rapid reconnects with 503 stream errors; pause before retrying.
+const RECONNECT_DELAY_MS = 5_000;
+// A Baileys socket can stay "open" while no longer delivering messages (Baileys #2491),
+// and only a fresh process recovers it. launchd's KeepAlive restarts us after exit.
+const DEAF_AFTER_MS = 3 * 60 * 60 * 1000;
 mkdirSync(dataDirectory, { recursive: true });
 
 const archive = new WhatsAppArchive(join(dataDirectory, "messages.sqlite"));
@@ -30,6 +37,7 @@ let qr: string | null = null;
 let historyChunks = 0;
 let historyMessages = 0;
 let lastHistorySyncAt: string | null = null;
+let lastMessageAt = Date.now();
 const disconnectErrorSchema = z.object({
   output: z.object({ statusCode: z.number() }),
 });
@@ -40,6 +48,7 @@ const storeMessages = (messages: readonly WAMessage[]): ArchivedMessage[] => {
     return result ? [result] : [];
   });
   archive.storeMessages(archived);
+  lastMessageAt = Date.now();
   return archived;
 };
 
@@ -101,44 +110,51 @@ const backfillGroupNames = async (socket: ReturnType<typeof makeWASocket>): Prom
   }
 };
 
-Bun.serve({
-  hostname: "127.0.0.1",
-  port,
-  fetch(request): Response {
-    const url = new URL(request.url);
-    if (url.pathname === "/status") {
-      return Response.json({
-        connected,
-        name,
-        phone,
-        qrReady: qr !== null,
-        historyChunks,
-        historyMessages,
-        lastHistorySyncAt,
-        ...archive.status(),
-      });
-    }
-    if (url.pathname === "/qr") {
-      return qr ? new Response(qr) : Response.json({ error: "QR not ready" }, { status: 404 });
-    }
-    if (url.pathname === "/chats") return Response.json(archive.listChats());
-    if (url.pathname === "/messages") {
-      const jid = url.searchParams.get("jid");
-      if (!jid) return Response.json({ error: "provide jid" }, { status: 400 });
-      const limit = Number(url.searchParams.get("limit") ?? "100");
-      return Response.json({ jid, messages: archive.listMessages(jid, limit) });
-    }
-    return Response.json({ error: "not found" }, { status: 404 });
-  },
-});
+const limitSchema = z.coerce.number().int().positive().default(100);
+
+const route = (url: URL): { status: number; body: unknown } => {
+  if (url.pathname === "/status") {
+    return {
+      status: 200,
+      body: { connected, name, phone, qrReady: qr !== null, historyChunks, historyMessages, lastHistorySyncAt, ...archive.status() },
+    };
+  }
+  if (url.pathname === "/qr") return qr ? { status: 200, body: qr } : { status: 404, body: { error: "QR not ready" } };
+  if (url.pathname === "/chats") return { status: 200, body: archive.listChats() };
+  if (url.pathname === "/messages") {
+    const jid = url.searchParams.get("jid");
+    if (!jid) return { status: 400, body: { error: "provide jid" } };
+    const limit = limitSchema.safeParse(url.searchParams.get("limit") ?? undefined);
+    if (!limit.success) return { status: 400, body: { error: "limit must be a positive integer" } };
+    return { status: 200, body: { jid, messages: archive.listMessages(jid, limit.data) } };
+  }
+  return { status: 404, body: { error: "not found" } };
+};
+
+// Node, unlike Bun.serve, treats a throw in a request listener as fatal; answer 500 instead.
+const safeRoute = (url: URL): { status: number; body: unknown } => {
+  try {
+    return route(url);
+  } catch (error) {
+    console.error(JSON.stringify({ type: "http-error", path: url.pathname, error: String(error) }));
+    return { status: 500, body: { error: "internal error" } };
+  }
+};
+
+createServer((request, response) => {
+  const { status, body } = safeRoute(new URL(request.url ?? "/", "http://127.0.0.1"));
+  const isText = typeof body === "string";
+  response.writeHead(status, { "content-type": isText ? "text/plain" : "application/json" });
+  response.end(isText ? body : JSON.stringify(body));
+}).listen(port, "127.0.0.1");
 
 const start = async (): Promise<void> => {
-  const { state, saveCreds } = await useMultiFileAuthState(join(dataDirectory, "session"));
+  const { state, saveCreds } = await useMultiFileAuthState(sessionDirectory);
   const { version } = await fetchLatestBaileysVersion();
   const socket = makeWASocket({
     version,
     auth: state,
-    browser: Browsers.macOS("Desktop"),
+    browser: Browsers.macOS("Chrome"),
     syncFullHistory: true,
     shouldSyncHistoryMessage: () => true,
     markOnlineOnConnect: false,
@@ -168,6 +184,7 @@ const start = async (): Promise<void> => {
     if (nextQr) qr = nextQr;
     if (connection === "open") {
       connected = true;
+      lastMessageAt = Date.now();
       qr = null;
       name = socket.user?.name ?? null;
       phone = socket.user?.id.split(":")[0] ?? null;
@@ -182,13 +199,20 @@ const start = async (): Promise<void> => {
     connected = false;
     const parsedError = disconnectErrorSchema.safeParse(lastDisconnect?.error);
     const statusCode = parsedError.success ? parsedError.data.output.statusCode : null;
-    if (statusCode === DisconnectReason.loggedOut) {
-      console.error("WhatsApp session logged out; delete the sidecar session and pair again.");
-      return;
-    }
-    void start();
+    const loggedOut = statusCode === DisconnectReason.loggedOut;
+    console.log(JSON.stringify({ type: "disconnected", statusCode, loggedOut }));
+    // Logged-out credentials can never reconnect; drop them so the next start serves a fresh QR.
+    if (loggedOut) rmSync(sessionDirectory, { recursive: true, force: true });
+    setTimeout(() => void start(), RECONNECT_DELAY_MS);
   });
 };
+
+setInterval(() => {
+  const silentMs = Date.now() - lastMessageAt;
+  if (!connected || silentMs < DEAF_AFTER_MS) return;
+  console.log(JSON.stringify({ type: "deaf-session-exit", silentMinutes: Math.round(silentMs / 60_000) }));
+  process.exit(1);
+}, 10 * 60 * 1000);
 
 console.log(JSON.stringify({ type: "http", port, dataDirectory }));
 await start();

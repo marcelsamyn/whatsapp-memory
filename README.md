@@ -6,14 +6,18 @@ chats into [Memory](https://petals.chat) as structured transcripts — one
 
 ## Components
 
-- **gateway** (`bun run whatsapp`) — Baileys sidecar. Pairs via QR, stores
+- **gateway** (`bun run whatsapp`) — Baileys sidecar, run under Node (Baileys
+  does not support Bun). Exits after 3 h without messages so launchd restarts
+  a "deaf" socket. Pairs via QR, stores
   messages + contacts in `~/.screenpipe-distiller/whatsapp/messages.sqlite`,
   exposes `GET /status` `/qr` `/chats` `/messages` on `127.0.0.1:3036`. Reuses
   the existing session dir, so migrating from screenpipe-distiller needs **no
   re-pair**.
 - **pusher** (`bun run push`) — reads completed days, builds transcripts, POSTs
   them to Petals `/api/memory/ingest/transcript`, and records a watermark in
-  `push-state.sqlite`. `bun run push --backfill 60` for a deeper one-shot.
+  `push-state.sqlite`. `bun run push --backfill 60` for a deeper one-shot. If
+  the newest archived message is over 24 h old, it shows a macOS notification
+  and exits non-zero.
 
 ## Setup
 

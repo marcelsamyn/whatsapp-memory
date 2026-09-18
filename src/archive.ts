@@ -1,4 +1,5 @@
-import { Database } from "bun:sqlite";
+import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 
 export type ArchivedMessage = {
   id: string;
@@ -17,18 +18,50 @@ export type ArchivedChat = {
   lastMessageTimestamp: number;
 };
 
-type MessageRow = Omit<ArchivedMessage, "fromMe"> & { fromMe: number };
+const messageRowSchema = z
+  .object({
+    id: z.string(),
+    jid: z.string(),
+    fromMe: z.number(),
+    sender: z.string(),
+    text: z.string().nullable(),
+    mediaType: z.string().nullable(),
+    timestamp: z.number(),
+    pushName: z.string().nullable(),
+  })
+  .transform((row): ArchivedMessage => ({ ...row, fromMe: row.fromMe === 1 }));
+const chatRowSchema = z.object({ jid: z.string(), messageCount: z.number(), lastMessageTimestamp: z.number() });
+const nameRowSchema = z.object({ jid: z.string(), name: z.string() });
+const jidRowSchema = z.object({ jid: z.string() });
+const statusRowSchema = z.object({
+  chatCount: z.number(),
+  messageCount: z.number(),
+  lastMessageTimestamp: z.number().nullable(),
+});
+
+export type ArchiveStatus = z.infer<typeof statusRowSchema>;
+
+const MESSAGE_COLUMNS = `
+  id,
+  jid,
+  from_me AS fromMe,
+  sender,
+  text,
+  media_type AS mediaType,
+  timestamp,
+  push_name AS pushName
+`;
 
 export class WhatsAppArchive {
-  readonly #database: Database;
+  readonly #database: DatabaseSync;
 
   constructor(path: string, options: { readonly?: boolean } = {}) {
     if (options.readonly) {
       // Read-only connections cannot run DDL; the sidecar owns the schema.
-      this.#database = new Database(path, { readonly: true });
+      this.#database = new DatabaseSync(path, { readOnly: true });
       return;
     }
-    this.#database = new Database(path, { create: true });
+    this.#database = new DatabaseSync(path);
     this.#database.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS messages (
@@ -53,7 +86,7 @@ export class WhatsAppArchive {
   }
 
   storeMessages(messages: readonly ArchivedMessage[]): void {
-    const insert = this.#database.query(`
+    const insert = this.#database.prepare(`
       INSERT OR IGNORE INTO messages (
         id, jid, from_me, sender, text, media_type, timestamp, push_name
       ) VALUES (
@@ -61,12 +94,13 @@ export class WhatsAppArchive {
       )
     `);
 
-    this.#database.transaction((items: readonly ArchivedMessage[]) => {
-      items.forEach((message) =>
+    this.#database.exec("BEGIN");
+    try {
+      messages.forEach((message) =>
         insert.run(
           message.id,
           message.jid,
-          message.fromMe,
+          message.fromMe ? 1 : 0,
           message.sender,
           message.text,
           message.mediaType,
@@ -74,36 +108,26 @@ export class WhatsAppArchive {
           message.pushName,
         ),
       );
-    })(messages);
+      this.#database.exec("COMMIT");
+    } catch (error) {
+      this.#database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   listMessages(jid: string, limit: number): ArchivedMessage[] {
     const rows = this.#database
-      .query<MessageRow, [string, number]>(`
-        SELECT
-          id,
-          jid,
-          from_me AS fromMe,
-          sender,
-          text,
-          media_type AS mediaType,
-          timestamp,
-          push_name AS pushName
-        FROM messages
-        WHERE jid = ?
-        ORDER BY timestamp DESC
-        LIMIT ?
-      `)
+      .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE jid = ? ORDER BY timestamp DESC LIMIT ?`)
       .all(jid, limit);
 
-    return rows.reverse().map((row) => ({ ...row, fromMe: row.fromMe === 1 }));
+    return z.array(messageRowSchema).parse(rows).reverse();
   }
 
   upsertChatName(jid: string, name: string, isGroup: boolean, saved = false): void {
     // `saved` (address-book contact) is sticky once set; a real saved name is kept
     // over a later non-saved display name (e.g. a self-set pushName).
     this.#database
-      .query(`
+      .prepare(`
         INSERT INTO chats (jid, name, is_group, saved) VALUES (?, ?, ?, ?)
         ON CONFLICT(jid) DO UPDATE SET
           name = CASE
@@ -119,9 +143,7 @@ export class WhatsAppArchive {
 
   chatNames(): Map<string, string> {
     try {
-      const rows = this.#database
-        .query<{ jid: string; name: string }, []>(`SELECT jid, name FROM chats`)
-        .all();
+      const rows = z.array(nameRowSchema).parse(this.#database.prepare(`SELECT jid, name FROM chats`).all());
       return new Map(rows.map((row) => [row.jid, row.name]));
     } catch {
       // Archive written before name enrichment has no `chats` table — treat as no names.
@@ -132,9 +154,7 @@ export class WhatsAppArchive {
   /** JIDs of address-book ("saved") contacts — used to filter unknown group senders. */
   savedContacts(): Set<string> {
     try {
-      const rows = this.#database
-        .query<{ jid: string }, []>(`SELECT jid FROM chats WHERE saved = 1`)
-        .all();
+      const rows = z.array(jidRowSchema).parse(this.#database.prepare(`SELECT jid FROM chats WHERE saved = 1`).all());
       return new Set(rows.map((row) => row.jid));
     } catch {
       return new Set();
@@ -143,28 +163,17 @@ export class WhatsAppArchive {
 
   listMessagesInWindow(startUnix: number, endUnix: number): ArchivedMessage[] {
     const rows = this.#database
-      .query<MessageRow, [number, number]>(`
-        SELECT
-          id,
-          jid,
-          from_me AS fromMe,
-          sender,
-          text,
-          media_type AS mediaType,
-          timestamp,
-          push_name AS pushName
-        FROM messages
-        WHERE timestamp >= ? AND timestamp < ?
-        ORDER BY jid, timestamp ASC
-      `)
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE timestamp >= ? AND timestamp < ? ORDER BY jid, timestamp ASC`,
+      )
       .all(startUnix, endUnix);
 
-    return rows.map((row) => ({ ...row, fromMe: row.fromMe === 1 }));
+    return z.array(messageRowSchema).parse(rows);
   }
 
   listChats(): ArchivedChat[] {
-    return this.#database
-      .query<ArchivedChat, []>(`
+    const rows = this.#database
+      .prepare(`
         SELECT
           jid,
           COUNT(*) AS messageCount,
@@ -174,19 +183,20 @@ export class WhatsAppArchive {
         ORDER BY lastMessageTimestamp DESC
       `)
       .all();
+    return z.array(chatRowSchema).parse(rows);
   }
 
-  status(): { chatCount: number; messageCount: number } {
+  status(): ArchiveStatus {
     const row = this.#database
-      .query<{ chatCount: number; messageCount: number }, []>(`
+      .prepare(`
         SELECT
           COUNT(DISTINCT jid) AS chatCount,
-          COUNT(*) AS messageCount
+          COUNT(*) AS messageCount,
+          MAX(timestamp) AS lastMessageTimestamp
         FROM messages
       `)
       .get();
-
-    return row ?? { chatCount: 0, messageCount: 0 };
+    return statusRowSchema.parse(row);
   }
 
   close(): void {

@@ -7,10 +7,11 @@ LABEL="com.whatsapp-memory.gateway"
 AGENTS="$HOME/Library/LaunchAgents"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DATA_DIR="$HOME/.screenpipe-distiller/whatsapp"
-BUN="$(command -v bun || true)"
+# Baileys supports Node only; under Bun its WebSocket lifecycle events are missing.
+NODE="$(command -v node || true)"
 
-if [ -z "$BUN" ]; then
-  echo "error: 'bun' not found on PATH." >&2
+if [ -z "$NODE" ]; then
+  echo "error: 'node' (>= 23.6, for native TypeScript) not found on PATH." >&2
   exit 1
 fi
 
@@ -24,7 +25,7 @@ cat > "$AGENTS/$LABEL.plist" <<PLIST
 <dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>$BUN</string><string>run</string><string>whatsapp</string></array>
+  <array><string>$NODE</string><string>src/gateway.ts</string></array>
   <key>WorkingDirectory</key><string>$REPO</string>
   <key>EnvironmentVariables</key>
   <dict>

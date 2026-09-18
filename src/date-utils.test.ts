@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { previousDayKey, recentCompletedDayKeys, dayWindowUtc, yesterdayKey } from "./date-utils";
+import { previousDayKey, recentCompletedDayKeys, dayWindowUtc, yesterdayKey } from "./date-utils.ts";
 
 describe("yesterdayKey", () => {
   test("is correct across the autumn fall-back boundary (Europe/Brussels)", () => {

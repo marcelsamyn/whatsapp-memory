@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadConfig } from "./config";
+import { loadConfig } from "./config.ts";
 
 const base = { PETALS_API_KEY: "petals-x", SELF_ALIASES: "Marcel, +32123" };
 

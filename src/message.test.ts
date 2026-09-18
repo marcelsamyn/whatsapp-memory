@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toArchivedMessage } from "./message";
+import { toArchivedMessage } from "./message.ts";
 
 describe("toArchivedMessage", () => {
   test("maps a text message into the archive shape", () => {
@@ -52,5 +52,15 @@ describe("toArchivedMessage", () => {
       sender: "alice@s.whatsapp.net",
       text: "boarding now",
     });
+  });
+
+  test("unwraps disappearing-message payloads", () => {
+    expect(
+      toArchivedMessage({
+        key: { id: "e1", remoteJid: "person@s.whatsapp.net", fromMe: true },
+        messageTimestamp: 1_700_000_000,
+        message: { ephemeralMessage: { message: { extendedTextMessage: { text: "see you at 8" } } } },
+      }),
+    ).toMatchObject({ id: "e1", sender: "me", text: "see you at 8" });
   });
 });

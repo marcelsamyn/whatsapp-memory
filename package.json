@@ -4,13 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "whatsapp": "bun run src/gateway.ts",
+    "whatsapp": "node src/gateway.ts",
     "push": "bun run src/push.ts",
     "test": "bun test",
     "type-check": "bunx --bun tsc --noEmit"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "pino": "^10.3.1",
     "zod": "^3.24.1"
   },

@@ -1,10 +1,11 @@
-import type { WAMessage } from "@whiskeysockets/baileys";
-import type { ArchivedMessage } from "./archive";
+import { normalizeMessageContent, type WAMessage } from "@whiskeysockets/baileys";
+import type { ArchivedMessage } from "./archive.ts";
 
 export const toArchivedMessage = (message: WAMessage): ArchivedMessage | null => {
   const id = message.key.id;
   const jid = message.key.remoteJid;
-  const content = message.message;
+  // Disappearing-message and view-once chats wrap the payload one or more levels deep.
+  const content = normalizeMessageContent(message.message);
   if (!id || !jid || !content || jid === "status@broadcast") return null;
 
   const text =

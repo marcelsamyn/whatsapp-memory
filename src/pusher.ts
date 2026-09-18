@@ -3,17 +3,26 @@
  * (chat, day) as a transcript to Memory, skipping ones already recorded.
  */
 import { existsSync } from "node:fs";
-import { WhatsAppArchive } from "./archive";
-import { PushState } from "./push-state";
-import { buildDayTranscripts, type TranscriptPayload } from "./transcripts";
-import { ingestTranscript } from "./petals";
-import { dayWindowUtc, recentCompletedDayKeys } from "./date-utils";
-import type { Config } from "./config";
+import { WhatsAppArchive } from "./archive.ts";
+import { PushState } from "./push-state.ts";
+import { buildDayTranscripts, type TranscriptPayload } from "./transcripts.ts";
+import { ingestTranscript } from "./petals.ts";
+import { dayWindowUtc, recentCompletedDayKeys } from "./date-utils.ts";
+import type { Config } from "./config.ts";
 
 export interface PushSummary {
   pushed: number;
   skipped: number;
   failed: number;
+  /** Newest archived message (unix seconds); null when the archive is missing or empty. */
+  lastMessageTimestamp: number | null;
+}
+
+/** A linked, working gateway stores something every day; a day of silence means it broke. */
+const STALE_AFTER_SECONDS = 24 * 60 * 60;
+
+export function isArchiveStale(lastMessageTimestamp: number | null, now: Date): boolean {
+  return lastMessageTimestamp === null || now.getTime() / 1000 - lastMessageTimestamp > STALE_AFTER_SECONDS;
 }
 
 export interface PushDeps {
@@ -28,7 +37,7 @@ export async function runPush(config: Config, deps: PushDeps = {}): Promise<Push
     ((payload: TranscriptPayload) =>
       ingestTranscript(payload, { baseUrl: config.PETALS_BASE_URL, apiKey: config.PETALS_API_KEY }));
 
-  const summary: PushSummary = { pushed: 0, skipped: 0, failed: 0 };
+  const summary: PushSummary = { pushed: 0, skipped: 0, failed: 0, lastMessageTimestamp: null };
   if (!existsSync(config.WHATSAPP_ARCHIVE_PATH)) {
     console.warn(`[push] archive not found at ${config.WHATSAPP_ARCHIVE_PATH}; nothing to push`);
     return summary;
@@ -36,6 +45,7 @@ export async function runPush(config: Config, deps: PushDeps = {}): Promise<Push
 
   const archive = new WhatsAppArchive(config.WHATSAPP_ARCHIVE_PATH, { readonly: true });
   try {
+    summary.lastMessageTimestamp = archive.status().lastMessageTimestamp;
     const state = new PushState(config.PUSH_STATE_PATH);
     try {
       const names = archive.chatNames();

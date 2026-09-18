@@ -2,7 +2,7 @@
  * Builds per-(chat, day) WhatsApp transcript payloads from archived messages.
  * Aliases: whatsapp transcript builder, segmented utterances, day transcripts.
  */
-import type { ArchivedMessage } from "./archive";
+import type { ArchivedMessage } from "./archive.ts";
 
 export interface TranscriptUtterance {
   speakerLabel: string;

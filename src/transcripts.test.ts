@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildDayTranscripts } from "./transcripts";
-import type { ArchivedMessage } from "./archive";
+import { buildDayTranscripts } from "./transcripts.ts";
+import type { ArchivedMessage } from "./archive.ts";
 
 const msg = (
   over: Partial<ArchivedMessage> & Pick<ArchivedMessage, "id" | "jid" | "timestamp">,

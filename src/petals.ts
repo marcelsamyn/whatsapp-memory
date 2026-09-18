@@ -4,7 +4,7 @@
  * with exponential backoff; 4xx is a hard failure.
  */
 import { z } from "zod";
-import type { TranscriptPayload } from "./transcripts";
+import type { TranscriptPayload } from "./transcripts.ts";
 
 export class IngestError extends Error {}
 

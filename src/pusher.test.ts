@@ -2,10 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WhatsAppArchive, type ArchivedMessage } from "./archive";
-import { runPush } from "./pusher";
-import type { Config } from "./config";
-import type { TranscriptPayload } from "./transcripts";
+import { WhatsAppArchive, type ArchivedMessage } from "./archive.ts";
+import { isArchiveStale, runPush } from "./pusher.ts";
+import type { Config } from "./config.ts";
+import type { TranscriptPayload } from "./transcripts.ts";
 
 const paths: string[] = [];
 const tempPath = (tag: string): string => {
@@ -64,14 +64,14 @@ describe("runPush", () => {
     };
 
     const first = await runPush(config, { now: NOW, ingest });
-    expect(first).toEqual({ pushed: 1, skipped: 0, failed: 0 });
+    expect(first).toEqual({ pushed: 1, skipped: 0, failed: 0, lastMessageTimestamp: TS_15 });
     expect(sent[0]?.transcriptId).toBe("whatsapp-p@s.whatsapp.net-2026-06-15");
     expect(sent[0]?.content.utterances[0]).toEqual({ speakerLabel: "Pat", content: "yo", timestamp: "2026-06-15T08:00:00.000Z" });
 
     // Second run: already recorded → skipped, no new ingest.
     sent.length = 0;
     const second = await runPush(config, { now: NOW, ingest });
-    expect(second).toEqual({ pushed: 0, skipped: 1, failed: 0 });
+    expect(second).toEqual({ pushed: 0, skipped: 1, failed: 0, lastMessageTimestamp: TS_15 });
     expect(sent.length).toBe(0);
   });
 
@@ -86,16 +86,28 @@ describe("runPush", () => {
       throw new Error("boom");
     };
     const failRun = await runPush(config, { now: NOW, ingest: failing });
-    expect(failRun).toEqual({ pushed: 0, skipped: 0, failed: 1 });
+    expect(failRun).toMatchObject({ pushed: 0, skipped: 0, failed: 1 });
 
     // Not recorded, so a later good run pushes it.
     const okRun = await runPush(config, { now: NOW, ingest: async () => ({ jobId: "job_ok" }) });
-    expect(okRun).toEqual({ pushed: 1, skipped: 0, failed: 0 });
+    expect(okRun).toMatchObject({ pushed: 1, skipped: 0, failed: 0 });
   });
 
   test("returns a zero summary when the archive file is missing", async () => {
     const config = makeConfig(join(tmpdir(), "does-not-exist.sqlite"), tempPath("state"));
     const summary = await runPush(config, { now: NOW, ingest: async () => ({ jobId: "x" }) });
-    expect(summary).toEqual({ pushed: 0, skipped: 0, failed: 0 });
+    expect(summary).toEqual({ pushed: 0, skipped: 0, failed: 0, lastMessageTimestamp: null });
+  });
+});
+
+describe("isArchiveStale", () => {
+  test("is stale when the archive has no messages", () => {
+    expect(isArchiveStale(null, NOW)).toBe(true);
+  });
+
+  test("is fresh within a day of the newest message and stale after", () => {
+    const nowSeconds = NOW.getTime() / 1000;
+    expect(isArchiveStale(nowSeconds - 23 * 3600, NOW)).toBe(false);
+    expect(isArchiveStale(nowSeconds - 25 * 3600, NOW)).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { ingestTranscript, IngestError } from "./petals";
-import type { TranscriptPayload } from "./transcripts";
+import { ingestTranscript, IngestError } from "./petals.ts";
+import type { TranscriptPayload } from "./transcripts.ts";
 
 const payload: TranscriptPayload = {
   transcriptId: "whatsapp-p@s.whatsapp.net-2026-06-15",

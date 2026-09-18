@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { contactNameUpdates, groupNameUpdates, pushNameUpdates } from "./names";
+import { contactNameUpdates, groupNameUpdates, pushNameUpdates } from "./names.ts";
 
 describe("contactNameUpdates", () => {
   test("prefers name, then notify, then verifiedName; skips blanks and id-less", () => {
