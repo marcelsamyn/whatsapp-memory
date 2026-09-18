@@ -6,6 +6,7 @@ import { WhatsAppArchive, type ArchivedMessage } from "./archive.ts";
 import { isArchiveStale, runPush } from "./pusher.ts";
 import type { Config } from "./config.ts";
 import type { TranscriptPayload } from "./transcripts.ts";
+import { RateLimitedError } from "./petals.ts";
 
 const paths: string[] = [];
 const tempPath = (tag: string): string => {
@@ -91,6 +92,23 @@ describe("runPush", () => {
     // Not recorded, so a later good run pushes it.
     const okRun = await runPush(config, { now: NOW, ingest: async () => ({ jobId: "job_ok" }) });
     expect(okRun).toMatchObject({ pushed: 1, skipped: 0, failed: 0 });
+  });
+
+  test("stops the run at the first rate-limit rejection", async () => {
+    const archivePath = seedArchive([
+      { id: "1", jid: "a@s.whatsapp.net", fromMe: false, sender: "a@s.whatsapp.net", text: "one", mediaType: null, timestamp: TS_15, pushName: null },
+      { id: "2", jid: "b@s.whatsapp.net", fromMe: false, sender: "b@s.whatsapp.net", text: "two", mediaType: null, timestamp: TS_15, pushName: null },
+    ]);
+    const config = makeConfig(archivePath, tempPath("state"));
+    let calls = 0;
+    const rateLimited = async (): Promise<{ jobId: string }> => {
+      calls += 1;
+      throw new RateLimitedError("rate limited");
+    };
+
+    const summary = await runPush(config, { now: NOW, ingest: rateLimited });
+    expect(summary).toMatchObject({ pushed: 0, failed: 1 });
+    expect(calls).toBe(1);
   });
 
   test("returns a zero summary when the archive file is missing", async () => {

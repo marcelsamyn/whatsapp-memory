@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { WhatsAppArchive } from "./archive.ts";
 import { PushState } from "./push-state.ts";
 import { buildDayTranscripts, type TranscriptPayload } from "./transcripts.ts";
-import { ingestTranscript } from "./petals.ts";
+import { ingestTranscript, RateLimitedError } from "./petals.ts";
 import { dayWindowUtc, recentCompletedDayKeys } from "./date-utils.ts";
 import type { Config } from "./config.ts";
 
@@ -74,6 +74,11 @@ export async function runPush(config: Config, deps: PushDeps = {}): Promise<Push
             summary.pushed += 1;
           } catch (error) {
             summary.failed += 1;
+            if (error instanceof RateLimitedError) {
+              // Unrecorded transcripts are retried by the next run.
+              console.error(JSON.stringify({ type: "push-rate-limited", transcriptId: t.payload.transcriptId }));
+              return summary;
+            }
             console.error(
               JSON.stringify({ type: "push-failed", transcriptId: t.payload.transcriptId, error: String(error) }),
             );

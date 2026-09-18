@@ -8,6 +8,24 @@ import type { TranscriptPayload } from "./transcripts.ts";
 
 export class IngestError extends Error {}
 
+/**
+ * The Petals API key allows 100 requests and resets only after an hour with no
+ * requests, so retrying soon cannot succeed; callers should stop and resume later.
+ */
+export class RateLimitedError extends IngestError {}
+
+// Better Auth's api-key plugin reports its rate limit as 401 with this message.
+const rateLimitBodySchema = z.object({ error: z.literal("Rate limit exceeded.") });
+
+const isRateLimited = (status: number, body: string): boolean => {
+  if (status === 429) return true;
+  try {
+    return rateLimitBodySchema.safeParse(JSON.parse(body)).success;
+  } catch {
+    return false;
+  }
+};
+
 const responseSchema = z.object({ message: z.string(), jobId: z.string() }).passthrough();
 
 export interface IngestConfig {
@@ -52,8 +70,8 @@ export async function ingestTranscript(
         }
       }
       const text = await res.text();
-      // 429 (rate limited) is transient — retry it like a 5xx rather than hard-failing.
-      if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+      if (isRateLimited(res.status, text)) throw new RateLimitedError(`transcript ingest rate limited ${res.status}: ${text}`);
+      if (res.status >= 400 && res.status < 500) {
         throw new IngestError(`transcript ingest rejected ${res.status}: ${text}`);
       }
       lastErr = new IngestError(`transcript ingest failed ${res.status}: ${text}`);

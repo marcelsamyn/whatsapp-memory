@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ingestTranscript, IngestError } from "./petals.ts";
+import { ingestTranscript, IngestError, RateLimitedError } from "./petals.ts";
 import type { TranscriptPayload } from "./transcripts.ts";
 
 const payload: TranscriptPayload = {
@@ -64,16 +64,23 @@ describe("ingestTranscript", () => {
     expect(calls).toBe(4);
   });
 
-  test("retries a 429 rate-limit then succeeds", async () => {
+  test.each([
+    ["429", new Response("rate limited", { status: 429 })],
+    ["Better Auth 401", new Response(JSON.stringify({ error: "Rate limit exceeded." }), { status: 401 })],
+  ])("throws RateLimitedError on %s without retrying", async (_label, response) => {
     let calls = 0;
     const fetchImpl = (async () => {
       calls += 1;
-      return calls < 2
-        ? new Response("rate limited", { status: 429 })
-        : new Response(JSON.stringify({ message: "queued", jobId: "job_429" }), { status: 200 });
+      return response;
     }) as unknown as typeof fetch;
-    const res = await ingestTranscript(payload, config, { fetchImpl, sleep: noSleep });
-    expect(res.jobId).toBe("job_429");
-    expect(calls).toBe(2);
+    await expect(ingestTranscript(payload, config, { fetchImpl, sleep: noSleep })).rejects.toBeInstanceOf(RateLimitedError);
+    expect(calls).toBe(1);
+  });
+
+  test("keeps a plain 401 as a non-rate-limit rejection", async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ error: "Invalid API key" }), { status: 401 })) as unknown as typeof fetch;
+    const error = await ingestTranscript(payload, config, { fetchImpl, sleep: noSleep }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(IngestError);
+    expect(error).not.toBeInstanceOf(RateLimitedError);
   });
 });
